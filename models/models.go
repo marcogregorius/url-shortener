@@ -2,13 +2,12 @@ package models
 
 import (
 	"database/sql"
-	"fmt"
-	"log"
 	"reflect"
 	"time"
 
 	"github.com/lib/pq"
 	"github.com/lithammer/shortuuid"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -31,42 +30,29 @@ type Shortlink struct {
 	SourceUrl     string      `json:"source_url" validate:"required,url"`
 	Visited       int         `json:"visited"`
 	LastVisitedAt pq.NullTime `json:"last_visited_at"`
-	ExpiredAt     pq.NullTime `json:"expired_at"`
 	CreatedAt     pq.NullTime `json:"created_at"`
 }
 
-func (s *Shortlink) Format() (map[string]string, error) {
-	fields := reflect.TypeOf(s)
-	values := reflect.ValueOf(s)
-	fmt.Println(fields, values)
-	out := map[string]string{"a": "a"}
-	return out, nil
-	//if s.LastVisitedAt.Valid {
-	//s.LastVisitedAt = s.LastVisitedAt.Time
-	//}
-	//if s.ExpiredAt.Valid {
-	//s.ExpiredAt = s.ExpiredAt.Time
-	//}
-	//if s.CreatedAt.Valid {
-	//s.CreatedAt = s.CreatedAt.Time
-	//}
+func (s *Shortlink) formatForOutput() map[string]interface{} {
+	values := reflect.ValueOf(s).Elem()
+	typeOfS := values.Type()
+	out := map[string]interface{}{}
+	for i := 0; i < values.NumField(); i++ {
+		key := typeOfS.Field(i).Tag.Get("json")
+		value := values.Field(i).Interface()
+
+		// Special handling for pq.NullTime
+		if res, ok := value.(pq.NullTime); ok {
+			if res.Valid {
+				value = res.Time
+			} else {
+				value = nil
+			}
+		}
+		out[key] = value
+	}
+	return out
 }
-
-//type NullTime struct {
-//Time time.Time
-//}
-
-//func (nt *NullTime) Scan(value interface{}) error {
-//nt.Time = value.(time.Time)
-//return nil
-//}
-
-//func (nt NullTime) Value() (driver.Value, error) {
-//if !nt.Valid {
-//return nil, nil
-//}
-//return nt.Time, nil
-//}
 
 func InitDb() *sql.DB {
 	db, err = sql.Open("postgres", "postgres://localhost:5432/url-shortener?sslmode=disable")
@@ -76,34 +62,34 @@ func InitDb() *sql.DB {
 	return db
 }
 
-func (s *Shortlink) CreateShortlink() (err error) {
+func (s *Shortlink) CreateShortlink() (map[string]interface{}, error) {
 	s.Id = shortuuid.New()[Length:]
-	_, err = db.Exec("INSERT INTO tb_shortlinks(id,source_url,expired_at,created_at) VALUES($1, $2, $3, $4)",
-		s.Id, s.SourceUrl, s.ExpiredAt, time.Now())
-	if err == nil {
-		s.Format()
+	s.CreatedAt.Time, s.CreatedAt.Valid = time.Now(), true
+	_, err = db.Exec("INSERT INTO tb_shortlinks(id,source_url,created_at) VALUES($1, $2, $3)",
+		s.Id, s.SourceUrl, time.Now())
+	if err != nil {
+		return nil, err
 	}
-	return
+	return s.formatForOutput(), nil
 }
 
-func (s *Shortlink) GetShortlink() (err error) {
-	err = db.QueryRow("SELECT source_url,visited,last_visited_at,expired_at,created_at FROM tb_shortlinks WHERE id=$1", s.Id).
+func (s *Shortlink) GetShortlink() (map[string]interface{}, error) {
+	err = db.QueryRow("SELECT source_url,visited,last_visited_at,created_at FROM tb_shortlinks WHERE id=$1", s.Id).
 		Scan(&s.SourceUrl,
 			&s.Visited,
 			&s.LastVisitedAt,
-			&s.ExpiredAt,
 			&s.CreatedAt)
-	if err == nil {
-		s.Format()
+	if err != nil {
+		return nil, err
 	}
-	return
+	return s.formatForOutput(), nil
 }
 
-func (s *Shortlink) UpdateShortlink() (err error) {
-	_, err = db.Exec("UPDATE tb_shortlinks SET visited = $1, last_visited_at = $2 WHERE id = $3",
-		s.Visited, s.LastVisitedAt, s.Id)
-	if err == nil {
-		s.Format()
+func (s *Shortlink) VisitShortlink(incVisited bool) error {
+	_, err = db.Exec("UPDATE tb_shortlinks SET visited = visited + 1, last_visited_at = $1 WHERE id = $2",
+		s.LastVisitedAt, s.Id)
+	if err != nil {
+		return err
 	}
-	return
+	return nil
 }

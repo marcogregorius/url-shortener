@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,9 +10,13 @@ import (
 
 	"github.com/marcogregorius/url-shortener/models"
 	"github.com/marcogregorius/url-shortener/router"
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
 	var port string
 	flag.StringVar(&port, "port", ":8080", "Listening port")
 	flag.Parse()
@@ -31,6 +34,7 @@ func main() {
 		IdleTimeout:  time.Second * 60,
 	}
 	go func() {
+		//if err := http.ListenAndServe(port, r); err != nil {
 		if err := srv.ListenAndServe(); err != nil {
 			log.Fatal(err)
 		}
