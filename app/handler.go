@@ -1,6 +1,7 @@
-package handler
+package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,48 +12,55 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func PingHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) PingHandler(w http.ResponseWriter, r *http.Request) {
 	data := map[string]string{"ping": "pong"}
 	WriteJSON(w, http.StatusOK, data)
 }
 
-func GetShortlinkHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleGetShortlink(w http.ResponseWriter, r *http.Request) (models.Shortlink, map[string]interface{}, error) {
 	vars := mux.Vars(r)
 	s := models.Shortlink{Id: vars["id"]}
 	var res map[string]interface{}
 	var err error
-	if res, err = s.GetShortlink(); err != nil {
-		msg := []string{(err.Error())}
-		WriteError(w, http.StatusInternalServerError, msg)
+	if res, err = s.GetShortlink(a.DB); err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			msg := []string{("Shortlink not found")}
+			WriteError(w, http.StatusNotFound, msg)
+		default:
+			msg := []string{(err.Error())}
+			WriteError(w, http.StatusInternalServerError, msg)
+		}
+		return s, nil, err
+	}
+	return s, res, nil
+}
+
+func (a *App) GetShortlinkHandler(w http.ResponseWriter, r *http.Request) {
+	_, res, err := a.handleGetShortlink(w, r)
+	if err != nil {
 		return
 	}
 	WriteJSON(w, http.StatusOK, res)
 }
 
-func RedirectHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	s := models.Shortlink{Id: vars["id"]}
-	var res map[string]interface{}
-	var err error
-	if res, err = s.GetShortlink(); err != nil {
-		msg := []string{(err.Error())}
-		WriteError(w, http.StatusInternalServerError, msg)
+func (a *App) RedirectHandler(w http.ResponseWriter, r *http.Request) {
+	s, res, err := a.handleGetShortlink(w, r)
+	if err != nil {
 		return
 	}
-	//fmt.Println(res["source_url"])
-	//source := fmt.Sprintf(res["source_url"])
+
 	http.Redirect(w, r, res["source_url"].(string), http.StatusMovedPermanently)
 
-	// increase visited counter
-	s.Visited = s.Visited + 1
+	// update LastVisitedAt and Visited
 	s.LastVisitedAt.Time, s.LastVisitedAt.Valid = time.Now(), true
-	err = s.VisitShortlink(true)
+	err = s.VisitShortlink(a.DB)
 	if err != nil {
 		log.Error(err)
 	}
 }
 
-func CreateShortlinkHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) CreateShortlinkHandler(w http.ResponseWriter, r *http.Request) {
 	var s models.Shortlink
 	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
 		msg := []string{"invalid JSON body"}
@@ -69,7 +77,7 @@ func CreateShortlinkHandler(w http.ResponseWriter, r *http.Request) {
 
 	var res map[string]interface{}
 	var err error
-	if res, err = s.CreateShortlink(); err != nil {
+	if res, err = s.CreateShortlink(a.DB); err != nil {
 		msg := []string{"database error"}
 		WriteError(w, http.StatusInternalServerError, msg)
 		return

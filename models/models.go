@@ -7,7 +7,6 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/lithammer/shortuuid"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -15,14 +14,6 @@ const (
 	Length = 8
 	Table  = "tb_shortlinks"
 )
-
-// use db as global variable, so we don't have to Close() after every query
-var db *sql.DB
-var err error
-
-type Formatter interface {
-	Format() error
-}
 
 type Shortlink struct {
 	// Id is not validated as it is generated on method CreateShortlink()
@@ -34,6 +25,7 @@ type Shortlink struct {
 }
 
 func (s *Shortlink) formatForOutput() map[string]interface{} {
+	// returns the JSON representation in map, with fields following the json tag
 	values := reflect.ValueOf(s).Elem()
 	typeOfS := values.Type()
 	out := map[string]interface{}{}
@@ -54,18 +46,10 @@ func (s *Shortlink) formatForOutput() map[string]interface{} {
 	return out
 }
 
-func InitDb() *sql.DB {
-	db, err = sql.Open("postgres", "postgres://localhost:5432/url-shortener?sslmode=disable")
-	if err != nil {
-		log.Fatal(err)
-	}
-	return db
-}
-
-func (s *Shortlink) CreateShortlink() (map[string]interface{}, error) {
+func (s *Shortlink) CreateShortlink(db *sql.DB) (map[string]interface{}, error) {
 	s.Id = shortuuid.New()[Length:]
 	s.CreatedAt.Time, s.CreatedAt.Valid = time.Now(), true
-	_, err = db.Exec("INSERT INTO tb_shortlinks(id,source_url,created_at) VALUES($1, $2, $3)",
+	_, err := db.Exec("INSERT INTO tb_shortlinks(id,source_url,created_at) VALUES($1, $2, $3)",
 		s.Id, s.SourceUrl, time.Now())
 	if err != nil {
 		return nil, err
@@ -73,8 +57,8 @@ func (s *Shortlink) CreateShortlink() (map[string]interface{}, error) {
 	return s.formatForOutput(), nil
 }
 
-func (s *Shortlink) GetShortlink() (map[string]interface{}, error) {
-	err = db.QueryRow("SELECT source_url,visited,last_visited_at,created_at FROM tb_shortlinks WHERE id=$1", s.Id).
+func (s *Shortlink) GetShortlink(db *sql.DB) (map[string]interface{}, error) {
+	err := db.QueryRow("SELECT source_url,visited,last_visited_at,created_at FROM tb_shortlinks WHERE id=$1", s.Id).
 		Scan(&s.SourceUrl,
 			&s.Visited,
 			&s.LastVisitedAt,
@@ -85,8 +69,8 @@ func (s *Shortlink) GetShortlink() (map[string]interface{}, error) {
 	return s.formatForOutput(), nil
 }
 
-func (s *Shortlink) VisitShortlink(incVisited bool) error {
-	_, err = db.Exec("UPDATE tb_shortlinks SET visited = visited + 1, last_visited_at = $1 WHERE id = $2",
+func (s *Shortlink) VisitShortlink(db *sql.DB) error {
+	_, err := db.Exec("UPDATE tb_shortlinks SET visited = visited + 1, last_visited_at = $1 WHERE id = $2",
 		s.LastVisitedAt, s.Id)
 	if err != nil {
 		return err
