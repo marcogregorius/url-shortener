@@ -47,7 +47,7 @@ func (s *Shortlink) formatForOutput() map[string]interface{} {
 }
 
 func (s *Shortlink) CreateShortlink(db *sql.DB) (map[string]interface{}, error) {
-	s.Id = shortuuid.New()[Length:]
+	s.Id = shortuuid.New()[:Length]
 	s.CreatedAt.Time, s.CreatedAt.Valid = time.Now(), true
 	_, err := db.Exec("INSERT INTO tb_shortlinks(id,source_url,created_at) VALUES($1, $2, $3)",
 		s.Id, s.SourceUrl, time.Now())
